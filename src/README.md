@@ -39,6 +39,12 @@ We recommend writing TypeScript code using Visual Studio code:
 
 That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
 
+## ファイル構成
+
+### :file: ui.html
+UI の HTML ファイル。
+基本的に UI で必要となる CSS と JavaScript はすべてこのファイルに記述する必要があるため、CSS は style タグかインライン CSS、JavaScript はインライン script を使うことになります。
+
 ## TypeScript コンパイルの設定
 
 Figma Pluginsはブラウザで実行されるため、TypeScript を JavaScript にコンパイルする必要があります。

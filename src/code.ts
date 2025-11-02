@@ -1,163 +1,190 @@
-// This file holds the main code for plugins. Code in this file has access to
-// the *figma document* via the figma global object.
-// You can access browser APIs in the <script> tag inside "ui.html" which has a
-// full browser environment (See https://www.figma.com/plugin-docs/how-plugins-run).
+const CODEX_ENDPOINT = 'http://127.0.0.1:5000/ask';
 
-// Runs this code if the plugin is run in Figma
-if (figma.editorType === 'figma') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many rectangles on the screen.
+let conversationId: string | undefined;
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
+figma.showUI(__html__, { width: 420, height: 520 });
 
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates rectangles on the screen.
-      const numberOfRectangles = msg.count;
+figma.ui.onmessage = async (
+  msg: {
+    type: 'userQuery';
+    text: string;
+    history?: { role: 'user' | 'assistant'; content: string }[];
+  },
+) => {
+  if (msg.type !== 'userQuery') return;
 
-      const nodes: SceneNode[] = [];
-      for (let i = 0; i < numberOfRectangles; i++) {
-        const rect = figma.createRectangle();
-        rect.x = i * 150;
-        rect.fills = [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0 } }];
-        figma.currentPage.appendChild(rect);
-        nodes.push(rect);
-      }
-      figma.currentPage.selection = nodes;
-      figma.viewport.scrollAndZoomIntoView(nodes);
+  const designContext = buildDesignContext();
+  const body = buildRequestBody(msg.text, designContext);
+
+  try {
+    const response = await fetch(CODEX_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    const payload = await response.json().catch(async () => ({
+      error: {
+        code: 'INVALID_RESPONSE',
+        message: await safeReadText(response),
+      },
+    }));
+
+    if (!response.ok) {
+      const errorMessage = extractErrorMessage(payload);
+      throw new Error(errorMessage);
     }
 
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
+    conversationId = typeof payload.conversationId === 'string' ? payload.conversationId : conversationId;
+    const content = typeof payload.content === 'string' ? payload.content.trim() : '';
+
+    figma.ui.postMessage({ type: 'codexResponse', text: content });
+  } catch (error) {
+    let message = error instanceof Error ? error.message : 'Codexサーバーへのリクエストに失敗しました。';
+
+    if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+      message =
+        'CORSエラー: サーバーに接続できません。サーバーが起動しているか、Access-Control-Allow-Origin ヘッダーが設定されているか確認してください。';
+    }
+
+    if (error instanceof Error && error.message.includes('CORS')) {
+      message = error.message;
+    }
+
+    figma.ui.postMessage({
+      type: 'error',
+      text: `⚠️ ${message}`,
+    });
+  }
+};
+
+function buildRequestBody(userInput: string, designContext: string) {
+  return {
+    tool: 'codex',
+    model: 'codex:local',
+    userInput,
+    designContext,
+    conversationId,
   };
 }
 
-// Runs this code if the plugin is run in FigJam
-if (figma.editorType === 'figjam') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many shapes and connectors on the screen.
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
+function buildDesignContext(): string {
+  const selection = figma.currentPage.selection;
 
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates shapes and connectors on the screen.
-      const numberOfShapes = msg.count;
+  if (selection.length === 0) {
+    return describePage(figma.currentPage);
+  }
 
-      const nodes: SceneNode[] = [];
-      for (let i = 0; i < numberOfShapes; i++) {
-        const shape = figma.createShapeWithText();
-        // You can set shapeType to one of: 'SQUARE' | 'ELLIPSE' | 'ROUNDED_RECTANGLE' | 'DIAMOND' | 'TRIANGLE_UP' | 'TRIANGLE_DOWN' | 'PARALLELOGRAM_RIGHT' | 'PARALLELOGRAM_LEFT'
-        shape.shapeType = 'ROUNDED_RECTANGLE';
-        shape.x = i * (shape.width + 200);
-        shape.fills = [{ type: 'SOLID', color: { r: 1, g: 0.5, b: 0 } }];
-        figma.currentPage.appendChild(shape);
-        nodes.push(shape);
+  const lines: string[] = [`選択中の${selection.length}件:`];
+  for (const node of selection) {
+    lines.push(describeNode(node));
+
+    if (hasChildren(node)) {
+      const children = node.children.slice(0, 5);
+      for (const child of children) {
+        lines.push(`  - ${describeNode(child)}`);
       }
 
-      for (let i = 0; i < numberOfShapes - 1; i++) {
-        const connector = figma.createConnector();
-        connector.strokeWeight = 8;
-
-        connector.connectorStart = {
-          endpointNodeId: nodes[i].id,
-          magnet: 'AUTO',
-        };
-
-        connector.connectorEnd = {
-          endpointNodeId: nodes[i + 1].id,
-          magnet: 'AUTO',
-        };
+      if (node.children.length > 5) {
+        lines.push('  - ...');
       }
-
-      figma.currentPage.selection = nodes;
-      figma.viewport.scrollAndZoomIntoView(nodes);
     }
+  }
 
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+  return lines.join('\n');
 }
 
-// Runs this code if the plugin is run in Slides
-if (figma.editorType === 'slides') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many slides on the screen.
+function describePage(page: PageNode): string {
+  const lines: string[] = [`ページ「${page.name}」: レイヤー ${page.children.length} 件`];
+  const previewNodes = page.children.slice(0, 10);
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
+  for (const node of previewNodes) {
+    lines.push(`- ${describeNode(node)}`);
+  }
 
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates slides and puts the user in grid view.
-      const numberOfSlides = msg.count;
+  if (page.children.length > previewNodes.length) {
+    lines.push(`- ... (${page.children.length - previewNodes.length} 件省略)`);
+  }
 
-      const nodes: SlideNode[] = [];
-      for (let i = 0; i < numberOfSlides; i++) {
-        const slide = figma.createSlide();
-        nodes.push(slide);
-      }
-
-      figma.viewport.slidesView = 'grid';
-      figma.currentPage.selection = nodes;
-    }
-
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+  return lines.join('\n');
 }
 
-// Runs this code if the plugin is run in Buzz
-if (figma.editorType === 'buzz') {
-  // This plugin will open a window to prompt the user to enter a number, and
-  // it will then create that many frames on the screen.
+function describeNode(node: SceneNode): string {
+  const base = `${node.type}「${node.name}」`;
+  const size = 'width' in node && 'height' in node ? ` ${Math.round(node.width)}×${Math.round(node.height)}` : '';
+  const fills = getFillDescription(node);
+  const typography = getTypographyDescription(node);
 
-  // This shows the HTML page in "ui.html".
-  figma.showUI(__html__);
+  return [base, size, fills, typography].filter(Boolean).join(' ');
+}
 
-  // Calls to "parent.postMessage" from within the HTML page will trigger this
-  // callback. The callback will be passed the "pluginMessage" property of the
-  // posted message.
-  figma.ui.onmessage =  (msg: {type: string, count: number}) => {
-    // One way of distinguishing between different types of messages sent from
-    // your HTML page is to use an object with a "type" property like this.
-    if (msg.type === 'create-shapes') {
-      // This plugin creates frames and puts the user in grid view.
-      const numberOfFrames = msg.count;
+function getFillDescription(node: SceneNode): string | null {
+  if (!hasFills(node)) return null;
+  const paints = node.fills;
+  if (!Array.isArray(paints) || paints.length === 0) return null;
 
-      const nodes: FrameNode[] = [];
-      for (let i = 0; i < numberOfFrames; i++) {
-        const frame = figma.buzz.createFrame();
-        nodes.push(frame);
-      }
+  const [paint] = paints;
+  if (paint.type === 'SOLID') {
+    const { r, g, b } = paint.color;
+    const hex = rgbToHex(r, g, b);
+    const opacity = paint.opacity ?? 1;
+    const opacityText = opacity < 1 ? ` (opacity ${Math.round(opacity * 100)}%)` : '';
+    return `塗り:${hex}${opacityText}`;
+  }
 
-      figma.viewport.canvasView = 'grid';
-      figma.currentPage.selection = nodes;
-      figma.viewport.scrollAndZoomIntoView(nodes);
-    }
+  if (paint.type === 'GRADIENT_LINEAR') {
+    return '線形グラデーション';
+  }
 
-    // Make sure to close the plugin when you're done. Otherwise the plugin will
-    // keep running, which shows the cancel button at the bottom of the screen.
-    figma.closePlugin();
-  };
+  if (typeof paint.type === 'string') {
+    return paint.type.toLowerCase().replace(/_/g, ' ');
+  }
+
+  return '複合塗り';
+}
+
+function getTypographyDescription(node: SceneNode): string | null {
+  if (node.type !== 'TEXT') return null;
+  const rawText = node.characters.trim();
+  const characters = rawText.length > 20 ? `${rawText.slice(0, 20)}…` : rawText;
+  const fontSize = typeof node.fontSize === 'number' ? `${Math.round(node.fontSize)}px` : '';
+  return `テキスト「${characters || '（空文字）'}」${fontSize}`;
+}
+
+function rgbToHex(r: number, g: number, b: number): string {
+  const toHex = (value: number) => Math.round(value * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+async function safeReadText(response: Response): Promise<string> {
+  try {
+    return await response.text();
+  } catch (error) {
+    console.error('Failed to read response text', error);
+    return '';
+  }
+}
+
+function extractErrorMessage(payload: unknown): string {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'error' in payload &&
+    payload.error &&
+    typeof payload.error === 'object' &&
+    'message' in payload.error &&
+    typeof (payload.error as { message: unknown }).message === 'string'
+  ) {
+    return (payload.error as { message: string }).message;
+  }
+  return 'Codexサーバーでエラーが発生しました。';
+}
+
+function hasChildren(node: SceneNode): node is SceneNode & ChildrenMixin {
+  return 'children' in node;
+}
+
+function hasFills(node: SceneNode): node is SceneNode & GeometryMixin {
+  return 'fills' in node;
 }

@@ -1,61 +1,349 @@
-Below are the steps to get your plugin running. You can also find instructions at:
+# 🎨 Figma × ローカル Codex CLI チャット連携 実装ガイド（Hono + TypeScript 版）
 
-  https://www.figma.com/plugin-docs/plugin-quickstart-guide/
+Figma プラグインからローカルで動作する Codex CLI（ヘッドレスモード）に接続し、UI/UX の改善や配色提案をチャット形式で得るための完全ガイドです。バックエンドを **Hono + TypeScript** で実装し、Figma プラグインと連携する一連の手順・コードをまとめています。
 
-This plugin template uses Typescript and NPM, two standard tools in creating JavaScript applications.
+---
 
-First, download Node.js which comes with NPM. This will allow you to install TypeScript and other
-libraries. You can find the download link here:
+## 1. 概要とアーキテクチャ
 
-  https://nodejs.org/en/download/
-
-Next, install TypeScript using the command:
-
-  npm install -g typescript
-
-Finally, in the directory of your plugin, get the latest type definitions for the plugin API by running:
-
-  npm install --save-dev @figma/plugin-typings
-
-If you are familiar with JavaScript, TypeScript will look very familiar. In fact, valid JavaScript code
-is already valid Typescript code.
-
-TypeScript adds type annotations to variables. This allows code editors such as Visual Studio Code
-to provide information about the Figma API while you are writing code, as well as help catch bugs
-you previously didn't notice.
-
-For more information, visit https://www.typescriptlang.org/
-
-Using TypeScript requires a compiler to convert TypeScript (code.ts) into JavaScript (code.js)
-for the browser to run.
-
-We recommend writing TypeScript code using Visual Studio code:
-
-1. Download Visual Studio Code if you haven't already: https://code.visualstudio.com/.
-2. Open this directory in Visual Studio Code.
-3. Compile TypeScript to JavaScript: Run the "Terminal > Run Build Task..." menu item,
-    then select "npm: watch". You will have to do this again every time
-    you reopen Visual Studio Code.
-
-That's it! Visual Studio Code will regenerate the JavaScript file every time you save.
-
-## ファイル構成
-
-### :file: ui.html
-UI の HTML ファイル。
-基本的に UI で必要となる CSS と JavaScript はすべてこのファイルに記述する必要があるため、CSS は style タグかインライン CSS、JavaScript はインライン script を使うことになります。
-
-## TypeScript コンパイルの設定
-
-Figma Pluginsはブラウザで実行されるため、TypeScript を JavaScript にコンパイルする必要があります。
-以下のコマンドを入力し、自動コンパイルされるようにします。
-
-```bash
-npm run build -- --watch
+```
+┌──────────────────────────────┐
+│          Figma Editor        │
+│  ┌────────────────────────┐  │
+│  │     Figma Plugin       │  │
+│  │  ┌──────────────┐      │  │
+│  │  │ Chat UI (HTML)│ ⇄   │──┼── fetch() → http://localhost:5000/ask
+│  │  └──────────────┘      │  │
+│  │  Main code (TypeScript)│  │
+│  └────────────────────────┘  │
+└──────────────────────────────┘
+               ↓
+        ┌──────────────────────────┐
+        │   Hono API Server        │
+        │ (Node.js + Codex CLI)    │
+        └──────────────────────────┘
 ```
 
-## Figmaのデスクトップ アプリで Plugin を立ち上げる
+- **Figma プラグイン**
+  - `ui.html`: チャット UI（会話履歴と送信フォーム）
+  - `code.ts`: Figma API と Codex Hono サーバーを仲介するロジック
+- **ローカル Codex サーバー**
+  - `server/index.ts`: Hono + TypeScript で Codex CLI を HTTP 化
+  - `codex exec "<prompt>"` をプロセス実行し、レスポンスを返却
 
-Resources > Plugins > Development > 開発中の Plugin を選択し、Plugin を立ち上げる
+---
 
-Plugin を立ち上げたら、Plugin の window が表示されたら、開発準備完了です！
+## 2. 環境セットアップ
+
+```bash
+# 依存関係のインストール
+npm install
+
+# Figma プラグインの TypeScript をウォッチコンパイル
+npm run watch
+
+# Codex Hono サーバーを TypeScript のまま起動（ホットリロードなし）
+npm run server:dev
+# → 別途ビルドして常時稼働させたい場合
+npm run server:build && npm run server:start
+```
+
+> **前提**: Codex CLI がローカルで動作しており、`codex exec "..."` が利用可能であること。
+
+---
+
+## 3. Hono + TypeScript サーバー（`server/index.ts`）
+
+ローカルで Codex CLI を呼び出す HTTP API。CORS 設定で Figma iframe（null origin）からのアクセスを許可しています。
+
+```ts
+import { spawn } from 'node:child_process';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { serve } from '@hono/node-server';
+
+type ConversationTurn = { role: 'user' | 'assistant' | 'system'; content: string };
+
+type AskRequestBody = {
+  prompt?: string;
+  history?: ConversationTurn[];
+};
+
+const app = new Hono();
+app.use('*', cors());
+
+app.get('/healthz', (c) => c.json({ status: 'ok' }));
+
+app.post('/ask', async (c) => {
+  let request: AskRequestBody;
+  try {
+    request = await c.req.json<AskRequestBody>();
+  } catch (error) {
+    console.error('[CodexServer] JSON parse error:', error);
+    return c.json({ error: 'リクエストボディのJSON解析に失敗しました。' }, 400);
+  }
+
+  const prompt = request.prompt?.trim();
+  if (!prompt) return c.json({ error: 'prompt が空です。' }, 400);
+
+  const combinedPrompt = buildPrompt(prompt, request.history ?? []);
+
+  try {
+    const output = await runCodex(combinedPrompt);
+    return c.text(output);
+  } catch (error) {
+    console.error('[CodexServer] Codex CLI error:', error);
+    const message = error instanceof Error ? error.message : 'Codex CLI 実行時にエラーが発生しました。';
+    return c.json({ error: message }, 500);
+  }
+});
+
+const port = Number(process.env.PORT ?? 5000);
+serve({ fetch: app.fetch, port }, () => {
+  console.log(`✅ Codex Hono サーバーを起動しました (http://localhost:${port})`);
+});
+
+function buildPrompt(prompt: string, history: ConversationTurn[]): string {
+  if (history.length === 0) return prompt;
+  const formatted = history.map((turn) => `${turn.role.toUpperCase()}: ${turn.content}`).join('\n');
+  return `${formatted}\nUSER: ${prompt}`;
+}
+
+function runCodex(prompt: string, timeoutMs = 120_000): Promise<string> {
+  const command = process.env.CODEX_CMD ?? 'codex';
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, ['exec', prompt], {
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM');
+      reject(new Error('Codex CLI の応答がタイムアウトしました。'));
+    }, timeoutMs);
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve(stdout.trim());
+      } else {
+        const message = stderr.trim() || `Codex CLI exited with code ${code}`;
+        reject(new Error(message));
+      }
+    });
+  });
+}
+```
+
+---
+
+## 4. Figma プラグイン設定（`manifest.json`）
+
+```json
+{
+  "name": "Codex Design Chat",
+  "id": "1563837687656471019",
+  "api": "1.0.0",
+  "main": "code.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma"],
+  "ui": "ui.html",
+  "networkAccess": {
+    "allowedDomains": ["localhost", "127.0.0.1"],
+    "reasoning": "ローカルのCodex Honoサーバーと通信するため"
+  }
+}
+```
+
+---
+
+## 5. チャット UI（`ui.html`）
+
+Figma プラグインの iframe 内で動作するチャット UI。選択内容と会話履歴を保持し、Codex への問い合わせ中はボタンを無効化します。
+
+```html
+<div id="chat">
+  <div class="title">Codex Design Chat</div>
+  <div id="messages"></div>
+  <div class="status" id="status"></div>
+  <form id="composer">
+    <input id="input" type="text" placeholder="Codexに相談する内容を入力..." />
+    <button id="send" type="submit">送信</button>
+  </form>
+</div>
+
+<script>
+  const messages = document.getElementById('messages');
+  const input = document.getElementById('input');
+  const statusEl = document.getElementById('status');
+  const history = [];
+
+  function append(role, text) {
+    const bubble = document.createElement('div');
+    bubble.className = `bubble ${role}`;
+    bubble.textContent = text;
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function setSending(isSending) {
+    input.disabled = isSending;
+    document.getElementById('send').disabled = isSending;
+    statusEl.textContent = isSending ? 'Codexに問い合わせ中...' : '';
+  }
+
+  document.getElementById('composer').addEventListener('submit', (evt) => {
+    evt.preventDefault();
+    const value = input.value.trim();
+    if (!value) return;
+
+    append('user', value);
+    history.push({ role: 'user', content: value });
+    parent.postMessage({ pluginMessage: { type: 'userQuery', text: value, history } }, '*');
+    input.value = '';
+    setSending(true);
+  });
+
+  window.addEventListener('message', (event) => {
+    const message = event.data.pluginMessage;
+    if (!message) return;
+
+    if (message.type === 'codexResponse') {
+      append('assistant', message.text);
+      history.push({ role: 'assistant', content: message.text });
+      setSending(false);
+    }
+
+    if (message.type === 'error') {
+      append('assistant', message.text);
+      setSending(false);
+    }
+  });
+</script>
+```
+
+※ 実際のファイルではスタイルや細かい補助処理も含めています。
+
+---
+
+## 6. プラグイン本体（`code.ts`）
+
+- 選択中レイヤーまたはページ全体の情報を収集
+- プロンプトに Figma 構成 + ユーザー質問をまとめる
+- Codex からの返答を UI に返送
+
+```ts
+const CODEX_ENDPOINT = 'http://localhost:5000/ask';
+
+figma.showUI(__html__, { width: 420, height: 520 });
+
+figma.ui.onmessage = async (msg) => {
+  if (msg.type !== 'userQuery') return;
+
+  const designContext = buildDesignContext();
+  const prompt = createPrompt(msg.text, designContext);
+
+  const body = {
+    prompt,
+    history: [
+      {
+        role: 'system',
+        content:
+          'あなたはFigmaのUI/UXデザイナーです。デザインの改善提案と配色アドバイスを、簡潔かつ実践的に返答してください。',
+      },
+      ...(msg.history ?? []),
+    ],
+  };
+
+  try {
+    const response = await fetch(CODEX_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Codexサーバーエラー: ${response.status} ${text}`);
+    }
+
+    const answer = await response.text();
+    figma.ui.postMessage({ type: 'codexResponse', text: answer.trim() });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Codexサーバーへのリクエストに失敗しました。';
+    figma.ui.postMessage({ type: 'error', text: `⚠️ ${message}` });
+  }
+};
+```
+
+### デザイン情報抽出のサマリ
+
+- ノード名・種類・サイズ（幅×高さ）
+- 塗り（SOLID の場合は HEX + 不透明度）
+- テキストノードの文字列とフォントサイズ
+- 子ノードは最大 5 件まで列挙し、続きがあれば省略表示
+
+---
+
+## 7. プロンプト構成例
+
+```
+あなたはFigmaデザインのUI/UX専門家です。
+以下の情報を踏まえて、自然な日本語で改善案を回答してください。
+
+【Figmaデザインの構成】
+Frame「Header」 1440×100 塗り:#FFFFFF
+Frame「LoginForm」 400×300 塗り:#1976d2
+  - TEXT「ログイン」18px
+
+【ユーザーからの質問】
+「コントラストが弱いですが、改善するには？」
+```
+
+Codex 返答例:
+
+> ボタン背景が #1976D2、文字が白の場合、コントラスト比が低くなります。文字色を濃いネイビーに変更するか、ボタン色を暗く調整してコントラスト比 4.5:1 以上を目指しましょう。
+
+---
+
+## 8. テストと動作確認フロー
+
+1. `npm run server:dev` で Hono サーバーを起動
+2. `npm run watch` で `code.ts` → `code.js` を自動コンパイル
+3. Figma デスクトップアプリでプラグインを実行
+   - Resources → Plugins → Development → 本プラグインを選択
+4. プラグイン UI からメッセージ送信
+   - ローカル Codex CLI が返答し、UI に表示されれば成功
+
+> Codex CLI が起動していない場合はエラーメッセージが表示されます。
+
+---
+
+## 9. 今後の拡張アイデア
+
+- 🔄 **会話履歴の永続化**: Hono サーバー側でセッション管理し、長期的な会話文脈を維持
+- ✨ **提案の自動反映**: Codex が提案した配色やサイズを Figma API 経由で適用するアクションボタンを追加
+- 🧩 **MCP 連携**: Codex から直接 Figma API を叩く機能を組み込み、デザイン操作を自動化
+- 🎨 **カラースウォッチ プレビュー**: 返答内の HEX を検知し、UI に色のプレビューを表示
+
+---
+
+この README とソースをコピーすれば、Hono ベースのローカル Codex サーバーと連動した **Figma デザイン AI アシスタント** が完成します。カスタマイズしてチームのワークフローに組み込みましょう！

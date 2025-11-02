@@ -1,5 +1,5 @@
 {
-  "name": "byoa-ai-chat",
+  "name": "Codex Design Chat",
   "id": "1563837687656471019",
   "api": "1.0.0",
   "main": "code.js",
@@ -7,15 +7,11 @@
   "enableProposedApi": false,
   "documentAccess": "dynamic-page",
   "editorType": [
-    "figma",
-    "figjam",
-    "slides",
-    "buzz"
+    "figma"
   ],
   "ui": "ui.html",
   "networkAccess": {
-    "allowedDomains": [
-      "none"
-    ]
+    "allowedDomains": ["*"],
+    "reasoning": "ローカルのCodex Honoサーバーと通信するため"
   }
 }

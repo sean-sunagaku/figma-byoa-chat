@@ -1,0 +1,417 @@
+# Love Advisor プロジェクト用 Cursor ルール
+
+## Python テストのベストプラクティス
+
+### 1. インポート戦略
+- **常に直接インポートを使用**し、`importlib.util`を使った動的モジュールロードは避ける
+- **複雑な動的インポートは避ける**:
+  ```python
+  # 悪い例 - これはしない
+  import importlib.util
+  from pathlib import Path
+  
+  def _load_schema_module():
+      base_dir = Path(__file__).resolve().parents[3]
+      path = base_dir / "apis" / "schema" / "user_profile.py"
+      spec = importlib.util.spec_from_file_location("user_profile_schema", str(path))
+      # ... 複雑なロードロジック
+  ```
+- **シンプルな直接インポートを推奨**:
+  ```python
+  # 良い例 - これを使う
+  from apis.schema.user_profile import (
+      UserProfileCreateSchema,
+      UserProfileResponseSchema,
+      UserProfileUpdateSchema,
+  )
+  ```
+
+### 2. 型の一貫性
+- **モデルとテストデータの型が一致することを確認**
+- **SQLAlchemyモデル定義で期待される型をチェック**（例：`MutableList` vs `str`）
+- **テストファクトリーとモックデータで正しい型を使用**:
+  ```python
+  # 悪い例 - MutableListフィールドにJSON文字列
+  romantic_concerns = factory.LazyFunction(lambda: json.dumps(["communication"]))
+  
+  # 良い例 - MutableListフィールドに直接リスト
+  romantic_concerns = factory.LazyFunction(lambda: ["communication"])
+  ```
+
+### 3. ファイル名とリファクタリング
+- **ファイル名を変更する際は、すべての参照を更新**:
+  - 他のファイルのインポート文
+  - テストのパッチパス（例：`@patch("service.user_profile.asyncio.sleep")` → `@patch("service.user_profile_service.asyncio.sleep")`）
+  - モジュールパスへの文字列参照
+- **目的を示す説明的なファイル名を使用**（例：`user_profile.py`ではなく`user_profile_service.py`）
+
+### 4. テストモック
+- **APIエンドポイントのテストでは、依存するサービスクラスを常にモック**
+- **非同期メソッドは`AsyncMock`で適切にモック**:
+  ```python
+  # 良い例 - 適切な非同期メソッドのモック
+  mock_service_instance = mock_service_cls.return_value
+  mock_service_instance.get_profile = AsyncMock(return_value=None)
+  ```
+- **テスト中に実際のサービス呼び出しを引き起こすモックの欠落を避ける**
+
+### 5. テストでのエラーハンドリング
+- **実際の実装に基づいて正しいHTTPステータスコードを期待**
+- **ミドルウェアレベルとエンドポイントレベルの認証の違いを理解**
+- **APIエンドポイントで認証チェックが適切に実装されていることを確認**
+
+### 6. コードの整理
+- **テストファイルはシンプルで焦点を絞ったものにする**
+- **直接インポートで動作する場合は不要な複雑さ（動的インポートなど）を削除**
+- **類似のテストファイル間で一貫性を維持**
+- **テストデータの作成には一貫してファクトリーパターンを使用**
+
+### 7. SQLAlchemyのベストプラクティス
+- **`MutableList`と通常のJSONフィールドの違いを理解**
+- **テストオブジェクト作成時に適切なデータ型を使用**
+- **SQLAlchemyバリデーションエラーを引き起こす型の不一致を避ける**
+
+### 8. Pydanticバリデーションのベストプラクティス
+- **可能な限り`Field`の制約と`Literal`型を使用して自動バリデーションを活用**
+- **手動の`@field_validator`は複雑なロジックが必要な場合のみ使用**:
+  ```python
+  # 良い例 - Literal型で自動バリデーション
+  from typing import Literal
+  age_range: Literal["under_18", "19_24", "25_35", "36_plus"]
+  gender: Literal["male", "female"]
+  
+  # 悪い例 - 手動バリデーター（不要）
+  @field_validator("age_range")
+  @classmethod
+  def _validate_age_range(cls, v: str) -> str:
+      if v not in AGE_RANGE_VALUES:
+          raise ValueError("無効な年齢層です")
+      return v
+  ```
+- **`Literal`は必ず`typing`からインポート**（Pydanticからではない）:
+  ```python
+  # 正しいインポート
+  from typing import List, Optional, Literal
+  from pydantic import BaseModel, Field, field_validator, ConfigDict
+  ```
+- **複雑なデータ変換（JSON文字列→リストなど）は`@field_validator`を使用**
+- **定数定義は`Literal`型で直接指定することで削除可能**
+
+### 9. データの勝手な追加を避ける
+- **ユーザープロファイルやその他のエンティティを作成する際は、デフォルト値を勝手に設定しない**
+- **新規作成時は全てのフィールドを`None`または空の状態で初期化**:
+  ```python
+  # 悪い例 - 勝手にデフォルト値を設定
+  user_profile = UserProfile(
+      user_id=user_id,
+      name="",  # 空文字列を勝手に設定
+      age_range="under_18",  # デフォルト値を勝手に設定
+      gender="male",  # デフォルト値を勝手に設定
+      relationship_status="looking_for_partner",  # デフォルト値を勝手に設定
+  )
+  
+  # 良い例 - 全てNoneで初期化
+  user_profile = UserProfile(
+      user_id=user_id,
+      name=None,
+      age_range=None,
+      gender=None,
+      relationship_status=None,
+      romantic_concerns=None,
+      relationship_goals=None,
+  )
+  ```
+- **ユーザーが明示的にデータを入力するまで、データは空の状態で保持**
+- **デフォルト値が必要な場合は、ユーザーインターフェースレベルで処理**
+
+### 10. Factoryパターンの使用
+- **テストでオブジェクトを作成する際は、独自のヘルパー関数ではなくFactoryパターンを使用**
+- **既存のFactoryクラスを活用し、重複するヘルパー関数を削除**:
+  ```python
+  # 悪い例 - 独自のヘルパー関数
+  def _build_profile(
+      name="Taro",
+      age_range="25_35",
+      gender="male",
+      relationship_status="dating",
+      romantic_concerns=["confidence"],
+      relationship_goals=["marriage"],
+  ):
+      return UserProfile(
+          user_id="u1",
+          name=name,
+          age_range=age_range,
+          gender=gender,
+          relationship_status=relationship_status,
+          romantic_concerns=romantic_concerns,
+          romantic_concerns_other=None,
+          relationship_goals=relationship_goals,
+          relationship_goals_other=None,
+      )
+  
+  # 良い例 - Factoryパターンを使用
+  from tests.factory.user.user_profile_factory import UserProfileFactory
+  
+  profile = UserProfileFactory(
+      user_id="u1",
+      name="Taro",
+      age_range="25_35",
+      gender="male",
+      relationship_status="dating",
+      romantic_concerns=["confidence"],
+      relationship_goals=["marriage"],
+  )
+  ```
+- **Factoryクラスは`tests/factory/`ディレクトリに配置**
+- **Factoryクラスは`factory_boy`ライブラリを使用して実装**
+- **テストデータの一貫性と再利用性を向上させる**
+
+## フロントエンド開発ガイドライン
+
+### UIコンポーネントの使用
+- **Buttonコンポーネントの使用を必須とする**:
+  ```tsx
+  // 悪い例 - ネイティブのbutton要素を直接使用
+  <button 
+    type="button" 
+    onClick={handleClick}
+    className="w-full rounded-full bg-primary px-4 py-3 text-center font-medium text-primary-foreground shadow-button disabled:opacity-50"
+  >
+    次へ
+  </button>
+  
+  // 良い例 - 統一されたButtonコンポーネントを使用
+  import { Button } from '@/components/atom/Button'
+  
+  <Button
+    type="button"
+    disabled={hasCurrentStepErrors}
+    onPress={handleClick}
+  >
+    次へ
+  </Button>
+  ```
+- **Buttonコンポーネントの利点**:
+  - 統一されたスタイリングとデザインシステム
+  - アクセシビリティ機能の組み込み
+  - 一箇所でのスタイル管理
+  - 無効状態の適切な処理
+- **Buttonコンポーネントのプロパティ**:
+  - `type`: 'button' | 'submit'
+  - `disabled`: boolean
+  - `onPress`: () => void (onClickの代わり)
+  - `variant`: スタイルバリエーション
+  - `style`: カスタムスタイル
+
+### フォームバリデーション
+- **リアルタイムバリデーションの実装**:
+  ```tsx
+  // バリデーションエラーの検出
+  const hasCurrentStepErrors = (() => {
+    if (step === 1) {
+      return !!(errors.name || errors.ageRange || errors.gender || errors.relationshipStatus)
+    }
+    // ... 他のステップ
+    return false
+  })()
+  
+  // ボタンの無効化
+  <Button disabled={hasCurrentStepErrors || isSubmitting} type="submit">
+    {submitLabel}
+  </Button>
+  ```
+- **useMemoの代わりに即座実行関数を使用**:
+  ```tsx
+  // 悪い例 - useMemoで依存配列の問題が発生する可能性
+  const hasCurrentStepErrors = useMemo(() => {
+    // 計算ロジック
+  }, [step, errors])
+  
+  // 良い例 - 即座実行関数で確実に再計算
+  const hasCurrentStepErrors = (() => {
+    // 計算ロジック
+  })()
+  ```
+
+### TypeScript Props命名規則
+- **コンポーネントPropsの命名は`ComponentNameProps`形式を必須とする**:
+  ```tsx
+  // 悪い例 - 汎用的なProps名
+  interface Props {
+    control: Control<UserProfileFormSchema>
+    errors: FieldErrors<UserProfileFormSchema>
+  }
+  
+  export default function ProfileBasicInfo({ control, errors }: Props) {
+    // ...
+  }
+  
+  // 良い例 - コンポーネント名に基づいたProps名
+  interface ProfileBasicInfoProps {
+    control: Control<UserProfileFormSchema>
+    errors: FieldErrors<UserProfileFormSchema>
+  }
+  
+  export default function ProfileBasicInfo({ control, errors }: ProfileBasicInfoProps) {
+    // ...
+  }
+  ```
+- **Props命名の利点**:
+  - コンポーネント名との一貫性
+  - 型の明確性と可読性の向上
+  - リファクタリング時の影響範囲の把握
+  - IDEでの自動補完とナビゲーションの向上
+- **適用対象**:
+  - すべてのReactコンポーネントのProps
+  - カスタムフックの引数型（`useHookNameArgs`形式）
+  - ユーティリティ関数の引数型（`FunctionNameParams`形式）
+
+### コンポーネント設計のベストプラクティス
+- **不要なラッパーコンポーネントの削除を推奨**:
+  ```tsx
+  // 悪い例 - 不要なラッパーコンポーネント
+  // ProfileEditForm.tsx
+  export default function ProfileEditForm() {
+    return <ProfileForm mode="edit" />
+  }
+  
+  // ProfileRegistrationForm.tsx
+  export default function ProfileRegistrationForm() {
+    return <ProfileForm mode="register" />
+  }
+  
+  // ページコンポーネント
+  import ProfileEditForm from '@/components/organism/profile/ProfileEditForm'
+  export default function Page() {
+    return <ProfileEditForm />
+  }
+  
+  // 良い例 - 直接メインコンポーネントを使用
+  // ページコンポーネント
+  import ProfileForm from '@/components/organism/profile/ProfileForm'
+  export default function Page() {
+    return <ProfileForm mode="edit" />
+  }
+  ```
+- **ラッパーコンポーネントを削除する条件**:
+  - 単純にpropsを渡すだけのコンポーネント
+  - 追加のロジックやスタイリングがない
+  - 再利用性が低い
+  - メンテナンスコストが高い
+- **ラッパーコンポーネントを残すべき場合**:
+  - 複雑なロジックや状態管理がある
+  - 複数の子コンポーネントを組み合わせている
+  - 再利用性が高い
+  - 特定のドメインロジックをカプセル化している
+
+### Iconコンポーネントの管理
+- **Iconコンポーネントは個別ファイルで管理する**:
+  ```tsx
+  // 悪い例 - 複数のアイコンを1つのファイルにまとめる
+  // Icon.tsx
+  export function ChevronLeft(props: Props) { ... }
+  export function RadioChecked(props: Props) { ... }
+  export function CheckSquareChecked(props: Props) { ... }
+  
+  // 良い例 - 個別ファイルで管理
+  // ChevronLeftIcon.tsx
+  export function ChevronLeftIcon({ size, color, className, ...props }: ChevronLeftIconProps) { ... }
+  
+  // RadioCheckedIcon.tsx
+  export function RadioCheckedIcon({ size, color, className, ...props }: RadioCheckedIconProps) { ... }
+  ```
+- **Iconファイルの配置**:
+  - すべてのIconコンポーネントは`fe/src/components/atom/Icon/`ディレクトリに配置
+  - ファイル名は`ComponentNameIcon.tsx`形式
+  - コンポーネント名は`ComponentNameIcon`形式
+- **IconコンポーネントのProps統一**:
+  ```tsx
+  interface ComponentNameIconProps extends React.SVGProps<SVGSVGElement> {
+    size?: string
+    color?: string
+    className?: string
+  }
+  
+  export function ComponentNameIcon({
+    size = 'h-5 w-5',
+    color = 'text-primary-40',
+    className = '',
+    ...props
+  }: ComponentNameIconProps) {
+    return (
+      <svg className={`${size} ${color} ${className}`} {...props}>
+        {/* SVG content */}
+      </svg>
+    )
+  }
+  ```
+- **Iconコンポーネントの利点**:
+  - 個別のダウンロードと使用が可能
+  - 必要なアイコンのみをインポートしてバンドルサイズを最適化
+  - 各アイコンの独立したメンテナンス
+  - 一貫したPropsインターフェース
+
+## 一般的な開発ガイドライン
+
+### コード品質
+- 複雑な解決策よりもシンプルで読みやすいコードを書く
+- 可能な限り直接インポートを使用
+- コードベース全体で型の一貫性を維持
+- 作業完了前に徹底的にテストし、失敗するテストをすべて修正
+
+### リファクタリング
+- ファイル名を変更する際は、すべての参照を検索して更新
+- リファクタリング後はテストを実行して何も壊れていないことを確認
+- 変更を反映するようにドキュメントとコメントを更新
+
+### テスト
+- 外部依存関係を適切にモック
+- テストデータで適切なデータ型を使用
+- テストが分離されており、外部状態に依存しないことを確認
+- 理解しやすく保守しやすいテストを書く
+
+## 今回の修正で学んだ教訓
+
+### 問題のパターン
+1. **動的インポートの複雑さ** - `importlib.util`を使った複雑なロードは理解しにくく、メンテナンスが困難
+2. **型の不一致** - SQLAlchemyモデルとテストデータの型が一致しないと実行時エラーが発生
+3. **ファイル名変更時の見落とし** - パッチパスや文字列参照の更新忘れ
+4. **不適切なモック** - 非同期メソッドのモック不足によるテスト失敗
+
+### 解決策
+1. **直接インポートの採用** - シンプルで理解しやすいコード
+2. **型の一貫性チェック** - モデル定義とテストデータの型を合わせる
+3. **包括的な検索と置換** - ファイル名変更時はすべての参照を確認
+4. **適切なモック設定** - 非同期メソッドには`AsyncMock`を使用
+
+# Cursor Rules for Love Advisor Project
+
+## コメント規則
+- 全てのコメントは日本語で記述すること
+- 英語のコメントは使用禁止
+- コードの意図や複雑なロジックには必ず日本語でコメントを追加すること
+- TODOコメントも日本語で記述すること
+
+## コード品質規則
+- 使用されていないexportは削除すること
+- 重複した変数定義は避け、単一責任の原則に従うこと
+- `as const`を使用して型安全性を向上させること
+- `readonly`配列を適切に処理すること
+
+## 型定義規則
+- 型定義は`*_OPTIONS`から`*_VALUES`を動的に生成するパターンを使用すること
+- 重複を避けるため、`*_OPTIONS`を唯一の真実の源（single source of truth）として扱うこと
+
+## コンポーネント規則
+- React Hook FormのControllerを使用してフォームを管理すること
+- エラーハンドリングは適切に日本語メッセージで表示すること
+- ステップ形式のフォームでは、各ステップのバリデーションを適切に実装すること
+
+## ファイル構成
+- `fe/src/components/organism/profile/` ディレクトリ内のファイルは全て日本語コメントを使用
+- プロフィール関連のコンポーネントは適切に分離し、再利用可能な形で実装すること
+
+## スタイリング規則
+- スクロール可能な要素には必ず`custom-scrollbar`クラスを適用すること
+- `overflow-hidden`や`overflow-y-auto`を使用する際は、`custom-scrollbar`クラスと組み合わせて使用すること
+- カスタムスクロールバーのスタイルは`globals.css`で定義済みのため、新たに定義する必要はない

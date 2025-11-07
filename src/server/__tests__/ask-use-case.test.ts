@@ -4,6 +4,12 @@ import type { AIService } from '../ai-service';
 import type { PromptBuilder, PromptBuilderRegistry, PromptBuilderResolver } from '../prompt-builder';
 import type { ConversationRepository } from '../conversation-repository';
 import type { ChatMessage, SupportedTool } from '../client-registry';
+import type {
+  ChatResponseFormatter,
+  FormattedResponse,
+  FormatContext,
+} from '../response-formatter';
+import { formatterDisplayVersion } from '../response-formatter';
 
 // AskUseCase の振る舞いテスト。
 // Spec refs: TEST_PLAN /ask 正常系・異常系、DESIGN 4.0 AskUseCase
@@ -56,6 +62,7 @@ type CreateUseCaseOptions = {
   aiChat?: jest.MockedFunction<AIService['chat']>;
   conversationOverrides?: Partial<ConversationRepoMocks>;
   maxHistory?: number;
+  formatterResult?: FormattedResponse;
 };
 
 const createUseCase = (options: CreateUseCaseOptions = {}) => {
@@ -87,11 +94,20 @@ const createUseCase = (options: CreateUseCaseOptions = {}) => {
   const aiChat = options.aiChat ?? defaultAiChat;
   const aiServicePort: Pick<AIService, 'chat'> = { chat: aiChat };
 
+  const formatterResult: FormattedResponse =
+    options.formatterResult ??
+    ({ text: 'formatted', summary: [], improvements: [], nextActions: [] } as FormattedResponse);
+  const format = jest
+    .fn((_: FormatContext) => formatterResult)
+    .mockName('ChatResponseFormatter.format') as jest.MockedFunction<ChatResponseFormatter['format']>;
+  const responseFormatter: ChatResponseFormatter = { format };
+
   const useCase = new AskUseCase(
     aiServicePort,
     promptRegistry,
     conversationRepository,
     options.maxHistory ?? 50,
+    responseFormatter,
   );
 
   return {
@@ -101,6 +117,8 @@ const createUseCase = (options: CreateUseCaseOptions = {}) => {
     conversationRepositoryMocks: repoMocks,
     aiChat,
     resolve,
+    responseFormatter,
+    formatterResult,
   };
 };
 
@@ -125,9 +143,18 @@ describe('AskUseCase', () => {
     const aiResponse = { content: 'AI output', raw: { source: 'codex-cli' } };
     const aiChat = jest.fn<AIService['chat']>(async () => aiResponse);
 
-    const { useCase, conversationRepositoryMocks, resolve, promptBuilder } = createUseCase({
+    const formatterResult: FormattedResponse = {
+      text: '整形済み',
+      summary: ['summary'],
+      improvements: [{ point: 'improve', rationale: 'because' }],
+      nextActions: ['next'],
+      designContextNote: '選択中のレイヤーA/B',
+    };
+
+    const { useCase, conversationRepositoryMocks, resolve, promptBuilder, responseFormatter } = createUseCase({
       promptBuilder: builder,
       aiChat,
+      formatterResult,
     });
 
     // Act
@@ -135,9 +162,19 @@ describe('AskUseCase', () => {
 
     // Assert
     expect(result).toEqual({
-      content: 'AI output',
+      content: formatterResult.text,
       conversationId: 'new-id',
-      raw: aiResponse.raw,
+      raw: {
+        ...aiResponse.raw,
+        formatter: {
+          version: formatterDisplayVersion,
+          summary: formatterResult.summary,
+          improvements: formatterResult.improvements,
+          nextActions: formatterResult.nextActions,
+          designContextNote: formatterResult.designContextNote,
+          originalContent: aiResponse.content,
+        },
+      },
     });
     expect(conversationRepositoryMocks.getOrCreate).toHaveBeenCalledWith(undefined);
     expect(resolve).toHaveBeenCalledWith('codex');
@@ -145,6 +182,13 @@ describe('AskUseCase', () => {
     expect(promptBuilder.withHistory).toHaveBeenCalledWith([]);
     expect(promptBuilder.withUser).toHaveBeenCalledWith(baseInput.userInput);
     expect(aiChat).toHaveBeenCalledWith(baseInput.tool, builtMessages, undefined);
+    expect(responseFormatter.format).toHaveBeenCalledWith({
+      tool: baseInput.tool,
+      userInput: baseInput.userInput,
+      designContext: baseInput.designContext,
+      originalContent: aiResponse.content,
+      history: [],
+    });
     expect(conversationRepositoryMocks.append).toHaveBeenCalledWith('new-id',
       { role: 'user', content: baseInput.userInput },
       { role: 'assistant', content: aiResponse.content },
@@ -168,7 +212,7 @@ describe('AskUseCase', () => {
       history,
     }));
 
-    const { useCase, conversationRepositoryMocks, promptBuilder } = createUseCase({
+    const { useCase, conversationRepositoryMocks, promptBuilder, responseFormatter } = createUseCase({
       promptBuilder: builder,
       aiChat,
       conversationOverrides: { getOrCreate },
@@ -181,6 +225,13 @@ describe('AskUseCase', () => {
     expect(conversationRepositoryMocks.getOrCreate).toHaveBeenCalledWith('existing-id');
     expect(promptBuilder.withHistory).toHaveBeenCalledWith(history);
     expect(aiChat).toHaveBeenCalledWith('codex', history, undefined);
+    expect(responseFormatter.format).toHaveBeenCalledWith({
+      tool: input.tool,
+      userInput: input.userInput,
+      designContext: input.designContext,
+      originalContent: aiResponse.content,
+      history,
+    });
     expect(conversationRepositoryMocks.append).toHaveBeenCalledWith('existing-id',
       { role: 'user', content: baseInput.userInput },
       { role: 'assistant', content: aiResponse.content },
@@ -190,13 +241,20 @@ describe('AskUseCase', () => {
   it('空白のみの designContext を無視する', async () => {
     // Arrange (SPEC: TEST_PLAN AskUseCase で designContext 空文字)
     const builder = new MockPromptBuilder();
-    const { useCase, promptBuilder } = createUseCase({ promptBuilder: builder });
+    const { useCase, promptBuilder, responseFormatter } = createUseCase({ promptBuilder: builder });
 
     const input: ExecuteInput = { ...baseInput, designContext: '   ' };
 
     await useCase.execute(input);
 
     expect(promptBuilder.withDesignContext).not.toHaveBeenCalled();
+    expect(responseFormatter.format).toHaveBeenCalledWith({
+      tool: input.tool,
+      userInput: input.userInput,
+      designContext: undefined,
+      originalContent: '',
+      history: [],
+    });
   });
 
   it('options.timeoutMs を AIService に透過する', async () => {

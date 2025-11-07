@@ -11,6 +11,7 @@ import type { ServerConfig } from './env';
 import { CodexClient } from './clients/codex-client';
 import { ClaudeStubClient } from './clients/claude-client';
 import { createCodexRunner } from './run-codex';
+import { createDefaultFormatter } from './response-formatter';
 
 export const createHttpServer = (config: ServerConfig) => {
   const conversationRepository = new InMemoryConversationRepository();
@@ -20,11 +21,13 @@ export const createHttpServer = (config: ServerConfig) => {
   ]);
   const aiService = new AIService(clientRegistry);
   const promptBuilderRegistry = new PromptBuilderRegistry();
+  const responseFormatter = createDefaultFormatter();
   const askUseCase = new AskUseCase(
     aiService,
     promptBuilderRegistry,
     conversationRepository,
     config.maxHistory,
+    responseFormatter,
   );
 
   const askApp = createApp({ askUseCase });

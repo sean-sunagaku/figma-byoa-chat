@@ -4,6 +4,41 @@ Figma プラグインからローカルで動作する Codex CLI（ヘッドレ�
 
 ---
 
+## 0. React + Create Figma Plugin へのリプレイス（NEW）
+
+- プラグインのメインスレッドは `src/main.ts`、UI は React + CSS Modules で実装した `src/ui.tsx` に移行しました。`@create-figma-plugin/utilities` の `showUI / emit / on` を使い、`SUBMIT_QUERY` / `SDK_CHANGED` / `CODEX_RESPONSE` / `PLUGIN_ERROR` イベントで状態を同期します。
+- `npm run build` / `npm run watch` は `build-figma-plugin` CLI を呼び出し、`src/build` 配下のバンドルと `src/manifest.json` を自動生成します。Figma には生成済みマニフェストを指定するだけで React UI が読み込まれます。
+- React の `jsx-runtime` は `preact` にエイリアスしているため、軽量なバンドルサイズのまま React Hooks の書き味で開発できます（設定は `tsconfig.json` と `build-figma-plugin.ui.js`）。
+- `src/types.ts` に UI/Main 共有の型を集約し、Codex/Claude 切り替えや履歴送信ロジックを型安全に保っています。
+
+### Create Figma Plugin ツールキットのローカル利用手順
+
+```
+$ git clone https://github.com/yuanqing/create-figma-plugin
+$ cd create-figma-plugin
+$ git checkout --track origin/next
+$ npm install
+$ npm run build
+
+# 本リポジトリ (my-project) と並べて配置し、ローカルビルドへ差し替える場合
+$ ls -a
+create-figma-plugin  my-project
+$ sh create-figma-plugin/scripts/symlink.sh create-figma-plugin my-project
+```
+
+### プラグイン側のビルド & 実行
+
+```
+$ cd my-project/src
+$ npm install
+$ npm run watch   # manifest.json と build/ を自動出力、Figma ではこの manifest を指定
+# リリース用
+$ npm run build
+```
+
+ビルド済み `src/manifest.json` を Figma の「プラグインを開く」から指定すれば、React ベースのチャット UI が起動します。UI 側では SDK 選択をローカルストレージに保持し、メインスレッドは `buildDesignContext` で選択レイヤーの情報をまとめて Codex/Claude サーバーに送信します。
+
+
 ## 1. 概要とアーキテクチャ
 
 ```

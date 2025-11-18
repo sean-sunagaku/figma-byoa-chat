@@ -1,0 +1,1 @@
+FigmaプラグインからローカルのCodex CLIを呼び出してUI/UX改善フィードバックを得るためのプロジェクト。プラグイン側はTypeScriptベースでFigmaの選択情報をまとめたプロンプトを生成し、Hono + TypeScript製のローカルHTTPサーバー（codex execをspawn）経由でCodexとチャットする。ランタイムはNode.js/TypeScript、サーバーはHono、プラグインUIはHTML+TSで構成されている。

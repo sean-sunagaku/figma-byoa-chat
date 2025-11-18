@@ -1,0 +1,1 @@
+作業完了前に関連するTypeScriptをビルド/ウォッチ (`npm run build` or `npm run watch`) して型エラーを確認し、必要なら`npm run server:dev`上でHonoサーバーの動作を確認する。品質担保として`npm run lint`と`npm test`（jest.config.cjs）を実行。Figmaプラグインの変更は`code.ts`→`code.js`へのビルドを忘れずに。

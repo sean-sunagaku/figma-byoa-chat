@@ -1,0 +1,1 @@
+開発系: `npm install`（依存インストール）、`npm run watch`（FigmaプラグインTSウォッチ）、`npm run server:dev`（Honoサーバーをtsxで起動）、`npm run server:build`→`npm run server:start`（本番用ビルド＆実行）。品質系: `npm run lint` / `npm run lint:fix`、`npm test`（Jest）。

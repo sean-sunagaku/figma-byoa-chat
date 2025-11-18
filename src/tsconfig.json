@@ -1,10 +1,39 @@
 {
   "compilerOptions": {
-    "target": "es2019",
-    "lib": ["es2019", "dom"],
+    "target": "ES2020",
+    "module": "ES2020",
+    "lib": ["DOM", "ES2021"],
+    "moduleResolution": "Node",
+    "jsx": "react-jsx",
     "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
     "types": ["@figma/plugin-typings"],
-    "skipLibCheck": true
+    "baseUrl": ".",
+    "paths": {
+      "react": ["./node_modules/preact/compat"],
+      "react-dom": ["./node_modules/preact/compat"],
+      "react/jsx-runtime": ["./node_modules/preact/jsx-runtime"],
+      "react/jsx-dev-runtime": ["./node_modules/preact/jsx-runtime"]
+    }
   },
-  "include": ["code.ts"]
+  "include": [
+    "main.ts",
+    "ui.tsx",
+    "types.ts",
+    "styles.d.ts",
+    "ui/**/*.ts",
+    "ui/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "server",
+    "build"
+  ]
 }

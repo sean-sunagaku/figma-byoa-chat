@@ -3,7 +3,6 @@ import {
   CodexPromptBuilder,
   ClaudePromptBuilder,
   PromptBuilderRegistry,
-  type PromptBuilder,
 } from '../prompt-builder';
 import type { ChatMessage } from '../client-registry';
 

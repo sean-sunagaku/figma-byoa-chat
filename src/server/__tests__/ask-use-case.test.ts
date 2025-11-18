@@ -3,7 +3,7 @@ import { AskUseCase, type AskUseCaseInput } from '../ask-use-case';
 import type { AIService } from '../ai-service';
 import type { PromptBuilder, PromptBuilderRegistry, PromptBuilderResolver } from '../prompt-builder';
 import type { ConversationRepository } from '../conversation-repository';
-import type { ChatMessage, SupportedTool } from '../client-registry';
+import type { ChatMessage } from '../client-registry';
 
 // AskUseCase の振る舞いテスト。
 // Spec refs: TEST_PLAN /ask 正常系・異常系、DESIGN 4.0 AskUseCase
@@ -24,17 +24,17 @@ class MockPromptBuilder implements PromptBuilder {
     this.result = config.buildResult ? [...config.buildResult] : [];
   }
 
-  withDesignContext = jest.fn((text?: string | null) => {
+  withDesignContext = jest.fn((_text?: string | null) => {
     if (this.order) this.order.push('withDesignContext');
     return this;
   });
 
-  withHistory = jest.fn((history?: ChatMessage[]) => {
+  withHistory = jest.fn((_history?: ChatMessage[]) => {
     if (this.order) this.order.push('withHistory');
     return this;
   });
 
-  withUser = jest.fn((input: string) => {
+  withUser = jest.fn((_input: string) => {
     if (this.order) this.order.push('withUser');
     return this;
   });

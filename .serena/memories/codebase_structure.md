@@ -1,0 +1,1 @@
+ルート直下にLICENSEやREADME、Codex CLI連携のためのsrcディレクトリがある。`src/`配下にFigmaプラグイン本体（`code.ts`/`code.js`、`ui.html`）、ドキュメント群、設定ファイル（`tsconfig*.json`、`manifest.json`、`jest.config.cjs`）と、HonoサーバーのTypeScript実装 (`server/index.ts` や関連ユーティリティ、ビルド済みコードは `dist/server`)、Node依存の `node_modules` が並ぶ。FigmaプラグインとサーバーでTypeScript設定を分けており、サーバーはTSX/tscでビルドして `dist/server` に出力する。

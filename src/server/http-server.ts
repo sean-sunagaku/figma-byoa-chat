@@ -9,14 +9,23 @@ import { PromptBuilderRegistry } from './prompt-builder';
 import { InMemoryConversationRepository } from './conversation-repository';
 import type { ServerConfig } from './env';
 import { CodexClient } from './clients/codex-client';
-import { ClaudeStubClient } from './clients/claude-client';
+import { ClaudeClient } from './clients/claude-client';
 import { createCodexRunner } from './run-codex';
+import { createClaudeRunner } from './run-claude';
 
 export const createHttpServer = (config: ServerConfig) => {
   const conversationRepository = new InMemoryConversationRepository();
   const clientRegistry = new ClientRegistry([
-    new CodexClient(createCodexRunner(config.codexCommand)),
-    new ClaudeStubClient(),
+    new CodexClient(
+      createCodexRunner(config.codexCommand, {
+        disabledMcpServers: config.codexDisabledMcpServers,
+      }),
+    ),
+    new ClaudeClient(
+      createClaudeRunner(config.claudeCommand, {
+        model: config.claudeModel,
+      }),
+    ),
   ]);
   const aiService = new AIService(clientRegistry);
   const promptBuilderRegistry = new PromptBuilderRegistry();

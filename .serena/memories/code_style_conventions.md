@@ -1,0 +1,1 @@
+TypeScriptがメインで、ESLintは`eslint:recommended`と`@typescript-eslint/recommended`、`@figma/figma-plugins/recommended`を適用。tsconfig.jsonとtsconfig.server.jsonを参照する設定。`@typescript-eslint/no-unused-vars`は未使用引数・変数をエラー扱いだが `_` プレフィックスで無視可能。基本的にTypeScriptの型を明示し、Figma/Node APIの型定義を利用する。

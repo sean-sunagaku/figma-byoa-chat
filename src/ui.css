@@ -1,0 +1,135 @@
+:global(*) {
+  box-sizing: border-box;
+}
+
+:global(body) {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  margin: 0;
+  padding: 12px;
+  background: #f5f5f7;
+  color: #1a1a1a;
+}
+
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 10px;
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.subtitle {
+  font-size: 12px;
+  color: #555961;
+}
+
+.sdkSelectorContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.sdkLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555961;
+}
+
+.sdkSelector {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #c5c8d0;
+  background: #ffffff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.sdkSelector:focus,
+.sdkSelector:hover {
+  outline: none;
+  border-color: #0065ff;
+  box-shadow: 0 0 0 2px rgba(0, 101, 255, 0.1);
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px;
+  background: #ffffff;
+  border: 1px solid #dcdcdc;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bubble {
+  padding: 8px 10px;
+  border-radius: 6px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.user {
+  align-self: flex-end;
+  background: #0065ff;
+  color: #ffffff;
+}
+
+.assistant {
+  align-self: flex-start;
+  background: #f0f4ff;
+  color: #182a4d;
+}
+
+.status {
+  font-size: 12px;
+  color: #70737c;
+  min-height: 16px;
+}
+
+.form {
+  display: flex;
+  gap: 8px;
+}
+
+.input {
+  flex: 1;
+  border-radius: 8px;
+  border: 1px solid #c5c8d0;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.button {
+  border-radius: 8px;
+  border: none;
+  padding: 8px 14px;
+  background: #0065ff;
+  color: #ffffff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.button[disabled] {
+  background: #a3b9ff;
+  cursor: not-allowed;
+}
+
+.button:not([disabled]):hover {
+  background: #0050cc;
+}

@@ -2,12 +2,12 @@
   "name": "byoa-ai-chat",
   "version": "1.0.0",
   "description": "自分のFigmaプラグイン",
-  "main": "code.js",
+  "main": "build/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "build-figma-plugin --typecheck --minify",
+    "watch": "build-figma-plugin --typecheck --watch",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
-    "watch": "npm run build -- --watch",
     "server:dev": "tsx watch --clear-screen=false server/index.ts",
     "server:build": "tsc -p tsconfig.server.json",
     "server:start": "node dist/server/index.js",
@@ -15,11 +15,32 @@
   },
   "author": "",
   "license": "",
+  "figma-plugin": {
+    "id": "1563837687656471019",
+    "name": "Codex Design Chat",
+    "api": "1.0.0",
+    "editorType": ["figma"],
+    "documentAccess": "dynamic-page",
+    "enableProposedApi": false,
+    "capabilities": [],
+    "networkAccess": {
+      "allowedDomains": ["*"],
+      "reasoning": "ローカルのCodex Honoサーバーと通信するため"
+    },
+    "main": "main.ts",
+    "ui": "ui.tsx"
+  },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.37",
+    "@create-figma-plugin/ui": "^2.6.1",
+    "@create-figma-plugin/utilities": "^2.6.1",
     "@hono/node-server": "^1.7.2",
-    "hono": "^4.2.9"
+    "dotenv": "^17.2.3",
+    "hono": "^4.2.9",
+    "preact": "^10.20.1"
   },
   "devDependencies": {
+    "@create-figma-plugin/build": "^2.6.1",
     "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "^1.119.0",
     "@types/jest": "^30.0.0",
@@ -40,7 +61,8 @@
     ],
     "parser": "@typescript-eslint/parser",
     "parserOptions": {
-      "project": ["./tsconfig.json", "./tsconfig.server.json"]
+      "project": ["./tsconfig.json", "./tsconfig.server.json"],
+      "tsconfigRootDir": "./src"
     },
     "root": true,
     "rules": {

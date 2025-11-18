@@ -1,7 +1,7 @@
 import { emit, on, showUI } from '@create-figma-plugin/utilities'
 
 import type { EventHandler } from '@create-figma-plugin/utilities'
-import type { SDK, SdkChangedPayload, SubmitQueryPayload } from './types'
+import type { SDK, SdkChangedPayload, SubmitQueryPayload, ComponentCreatedPayload } from './types'
 
 const CODEX_ENDPOINT = 'http://127.0.0.1:5000/ask'
 
@@ -9,6 +9,7 @@ const EVENT_SUBMIT_QUERY = 'SUBMIT_QUERY'
 const EVENT_SDK_CHANGED = 'SDK_CHANGED'
 const EVENT_RESPONSE = 'CODEX_RESPONSE'
 const EVENT_ERROR = 'PLUGIN_ERROR'
+const EVENT_COMPONENT_CREATED = 'COMPONENT_CREATED'
 
 let conversationId: string | undefined
 let currentSdk: SDK = 'codex'
@@ -67,9 +68,27 @@ async function handleSubmitQuery(payload: SubmitQueryPayload) {
       typeof payloadJson.conversationId === 'string' ? payloadJson.conversationId : conversationId
     const content = typeof payloadJson.content === 'string' ? payloadJson.content.trim() : ''
 
-    emit(EVENT_RESPONSE, {
-      text: content.length > 0 ? content : '（応答がありません）'
-    })
+    const { shouldCreateComponent } = parseCodexResponse(content)
+
+    if (shouldCreateComponent) {
+      const result = createComponentFromSelection()
+      if (result) {
+        const componentMessage = `✅ コンポーネント「${result.component.name}」を作成しました。\n\n${content}`
+        emit(EVENT_RESPONSE, { text: componentMessage })
+        emit(EVENT_COMPONENT_CREATED, {
+          componentName: result.component.name,
+          instanceCount: 1
+        })
+      } else {
+        emit(EVENT_RESPONSE, {
+          text: content.length > 0 ? content : '（応答がありません）'
+        })
+      }
+    } else {
+      emit(EVENT_RESPONSE, {
+        text: content.length > 0 ? content : '（応答がありません）'
+      })
+    }
   } catch (error: unknown) {
     emit(EVENT_ERROR, {
       message: formatErrorMessage(error, selectedSdk)
@@ -224,4 +243,119 @@ function hasChildren(node: SceneNode): node is SceneNode & ChildrenMixin {
 
 function hasFills(node: SceneNode): node is SceneNode & GeometryMixin {
   return 'fills' in node
+}
+
+function createComponentFromSelection(): { component: ComponentNode; instance: InstanceNode } | null {
+  const selection = figma.currentPage.selection
+
+  if (selection.length === 0) {
+    emit(EVENT_ERROR, { message: '⚠️ レイヤーを選択してください。' })
+    return null
+  }
+
+  try {
+    const frame = figma.group(selection, figma.currentPage)
+    const bounds = frame.absoluteBoundingBox
+
+    if (!bounds) {
+      frame.remove()
+      emit(EVENT_ERROR, { message: '⚠️ 選択したレイヤーの境界を取得できませんでした。' })
+      return null
+    }
+
+    const component = figma.createComponent()
+    component.name = generateComponentName(selection)
+    component.resize(bounds.width, bounds.height)
+
+    for (const child of frame.children) {
+      const clone = child.clone()
+      component.appendChild(clone)
+      if ('x' in child && 'y' in child) {
+        clone.x = child.x - bounds.x
+        clone.y = child.y - bounds.y
+      }
+    }
+
+    const instance = component.createInstance()
+    instance.x = bounds.x
+    instance.y = bounds.y
+
+    figma.currentPage.appendChild(component)
+    figma.currentPage.appendChild(instance)
+
+    frame.remove()
+
+    figma.currentPage.selection = [instance]
+    figma.viewport.scrollAndZoomIntoView([instance])
+
+    return { component, instance }
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'コンポーネントの作成に失敗しました。'
+    emit(EVENT_ERROR, { message: `⚠️ ${message}` })
+    return null
+  }
+}
+
+function generateComponentName(nodes: readonly SceneNode[]): string {
+  if (nodes.length === 1) {
+    return `Component_${nodes[0].name}`
+  }
+
+  const types = new Set(nodes.map(node => node.type))
+  if (types.size === 1) {
+    const type = Array.from(types)[0]
+    return `Component_${type}_Group`
+  }
+
+  return `Component_Mixed_${nodes.length}items`
+}
+
+function createInstanceFromComponent(component: ComponentNode): InstanceNode | null {
+  try {
+    const instance = component.createInstance()
+    
+    const lastInstance = figma.currentPage.findOne(
+      node => node.type === 'INSTANCE' && (node as InstanceNode).mainComponent === component
+    ) as InstanceNode | null
+
+    if (lastInstance) {
+      instance.x = lastInstance.x + lastInstance.width + 20
+      instance.y = lastInstance.y
+    } else {
+      instance.x = component.x + component.width + 20
+      instance.y = component.y
+    }
+
+    figma.currentPage.appendChild(instance)
+    figma.currentPage.selection = [instance]
+    figma.viewport.scrollAndZoomIntoView([instance])
+
+    return instance
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'インスタンスの作成に失敗しました。'
+    emit(EVENT_ERROR, { message: `⚠️ ${message}` })
+    return null
+  }
+}
+
+function findComponentByName(name: string): ComponentNode | null {
+  const components = figma.currentPage.findAll(node => node.type === 'COMPONENT') as ComponentNode[]
+  return components.find(comp => comp.name === name) || null
+}
+
+function parseCodexResponse(content: string): { shouldCreateComponent: boolean } {
+  const lowerContent = content.toLowerCase()
+  const componentKeywords = [
+    'コンポーネント',
+    'component',
+    'コンポーネント化',
+    '使い回',
+    '再利用'
+  ]
+
+  const shouldCreateComponent = componentKeywords.some(keyword => 
+    lowerContent.includes(keyword.toLowerCase())
+  )
+
+  return { shouldCreateComponent }
 }

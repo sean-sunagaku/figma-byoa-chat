@@ -28,3 +28,13 @@ export interface PluginErrorPayload {
 export interface PluginUIProps {
   initialSdk: SDK
 }
+
+export interface ComponentCreatedPayload {
+  componentName: string
+  instanceCount: number
+}
+
+export interface ComponentActionPayload {
+  action: 'create_component' | 'create_instance'
+  componentName?: string
+}
